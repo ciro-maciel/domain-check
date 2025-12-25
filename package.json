@@ -5,7 +5,8 @@
   "scripts": {
     "start": "bun run src/index.js",
     "dev": "bun run --watch src/index.js",
-    "test": "rm -f ./data/domain-check.db && TEST_MODE=true bun run src/index.js"
+    "test": "rm -f ./data/domain-check.db && TEST_MODE=true bun run src/index.js",
+    "summary": "SEND_SUMMARY=true bun run src/index.js"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3"

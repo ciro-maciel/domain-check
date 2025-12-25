@@ -7,18 +7,25 @@ import { eq } from "drizzle-orm";
 // Configuration
 // ============================================================================
 
-const DOMAIN = process.env.DOMAIN;
+const DOMAINS_RAW = process.env.DOMAIN;
 
-if (!DOMAIN) {
+if (!DOMAINS_RAW) {
   console.error("❌ ERROR: DOMAIN environment variable is required");
   console.error("   Example: DOMAIN=myleads.click bun run src/index.js");
+  console.error("   Multiple: DOMAIN=domain1.click,domain2.com,domain3.io");
   process.exit(1);
 }
 
+// Support multiple domains separated by comma
+const DOMAINS = DOMAINS_RAW.split(",")
+  .map((d) => d.trim())
+  .filter(Boolean);
+
 const CONFIG = {
-  DOMAIN,
-  RDAP_URL: `https://rdap.org/domain/${DOMAIN}`,
+  DOMAINS,
   CHECK_INTERVAL_MS: 10 * 60 * 1000, // 10 minutes
+  MAX_RETRIES: 3,
+  RETRY_DELAY_MS: 2000, // Start with 2s, then exponential backoff
   WEBHOOK_URL: process.env.WEBHOOK_URL,
   RESEND_API_KEY: process.env.RESEND_API_KEY,
   ALERT_EMAIL: process.env.ALERT_EMAIL,
@@ -32,7 +39,7 @@ const CONFIG = {
 const domainStatus = sqliteTable("domain_status", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   domain: text("domain").notNull().unique(),
-  status: text("status").notNull(), // "registered" | "available"
+  status: text("status").notNull(), // "registered" | "available" | "error"
   lastCheckedAt: integer("last_checked_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
@@ -42,7 +49,6 @@ const domainStatus = sqliteTable("domain_status", {
 // ============================================================================
 
 function initDatabase() {
-  // Ensure data directory exists
   const dir = CONFIG.DB_PATH.substring(0, CONFIG.DB_PATH.lastIndexOf("/"));
   if (dir) {
     Bun.spawnSync(["mkdir", "-p", dir]);
@@ -51,7 +57,6 @@ function initDatabase() {
   const sqlite = new Database(CONFIG.DB_PATH);
   const db = drizzle(sqlite);
 
-  // Create table if not exists
   sqlite.run(`
     CREATE TABLE IF NOT EXISTS domain_status (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,45 +67,71 @@ function initDatabase() {
     )
   `);
 
-  return db;
+  return { db, sqlite };
 }
 
 // ============================================================================
-// RDAP Domain Check
+// Utility: Sleep
 // ============================================================================
 
-async function checkDomainAvailability() {
-  // TEST_MODE: Simulate domain as available to test notifications
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// ============================================================================
+// RDAP Domain Check with Retry
+// ============================================================================
+
+async function checkDomainAvailability(domain, retries = CONFIG.MAX_RETRIES) {
+  // TEST_MODE: Simulate domain as available
   if (process.env.TEST_MODE === "true") {
-    console.log("[TEST] Simulating domain as AVAILABLE");
+    console.log(`[TEST] Simulating ${domain} as AVAILABLE`);
     return { available: true, status: "available" };
   }
 
-  try {
-    const response = await fetch(CONFIG.RDAP_URL, {
-      method: "GET",
-      headers: {
-        Accept: "application/rdap+json",
-      },
-    });
+  const rdapUrl = `https://rdap.org/domain/${domain}`;
 
-    // 404 = domain not found = available for registration
-    if (response.status === 404) {
-      return { available: true, status: "available" };
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(rdapUrl, {
+        method: "GET",
+        headers: { Accept: "application/rdap+json" },
+      });
+
+      // 404 = domain not found = available
+      if (response.status === 404) {
+        return { available: true, status: "available" };
+      }
+
+      // 200 = domain exists = registered
+      if (response.ok) {
+        return { available: false, status: "registered" };
+      }
+
+      // Rate limit or server error - retry
+      if (response.status === 429 || response.status >= 500) {
+        const delay = CONFIG.RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+        console.warn(
+          `[RDAP] ${domain}: Status ${response.status}, retry ${attempt}/${retries} in ${delay}ms`
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      // Other unexpected status
+      console.error(`[RDAP] ${domain}: Unexpected status ${response.status}`);
+      return { available: false, status: "error" };
+    } catch (error) {
+      const delay = CONFIG.RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+      console.warn(
+        `[RDAP] ${domain}: ${error.message}, retry ${attempt}/${retries} in ${delay}ms`
+      );
+      if (attempt < retries) {
+        await sleep(delay);
+      }
     }
-
-    // 200 = domain exists = registered
-    if (response.ok) {
-      return { available: false, status: "registered" };
-    }
-
-    // Other status codes (rate limit, server error, etc.)
-    console.error(`[RDAP] Unexpected status: ${response.status}`);
-    return { available: false, status: "error" };
-  } catch (error) {
-    console.error(`[RDAP] Fetch error: ${error.message}`);
-    return { available: false, status: "error" };
   }
+
+  console.error(`[RDAP] ${domain}: All ${retries} retries failed`);
+  return { available: false, status: "error" };
 }
 
 // ============================================================================
@@ -109,7 +140,7 @@ async function checkDomainAvailability() {
 
 async function sendWebhookAlert(domain, status) {
   if (!CONFIG.WEBHOOK_URL) {
-    console.warn("[Webhook] WEBHOOK_URL not configured, skipping notification");
+    console.warn("[Webhook] WEBHOOK_URL not configured, skipping");
     return;
   }
 
@@ -119,27 +150,17 @@ async function sendWebhookAlert(domain, status) {
       {
         title: "Domain Available!",
         description: `The domain **${domain}** is now **AVAILABLE** for registration!`,
-        color: 0x00ff00, // Green
+        color: 0x00ff00,
         fields: [
-          {
-            name: "Domain",
-            value: domain,
-            inline: true,
-          },
-          {
-            name: "Status",
-            value: status,
-            inline: true,
-          },
+          { name: "Domain", value: domain, inline: true },
+          { name: "Status", value: status, inline: true },
           {
             name: "Checked At",
             value: new Date().toISOString(),
             inline: false,
           },
         ],
-        footer: {
-          text: "Domain Monitor - Act fast!",
-        },
+        footer: { text: "Domain Monitor - Act fast!" },
       },
     ],
   };
@@ -147,16 +168,14 @@ async function sendWebhookAlert(domain, status) {
   try {
     const response = await fetch(CONFIG.WEBHOOK_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
 
     if (response.ok) {
-      console.log(`[Webhook] Alert sent successfully for ${domain}`);
+      console.log(`[Webhook] Alert sent for ${domain}`);
     } else {
-      console.error(`[Webhook] Failed to send: ${response.status}`);
+      console.error(`[Webhook] Failed: ${response.status}`);
     }
   } catch (error) {
     console.error(`[Webhook] Error: ${error.message}`);
@@ -168,8 +187,8 @@ async function sendWebhookAlert(domain, status) {
 // ============================================================================
 
 async function sendEmailAlert(domain) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const toEmail = process.env.ALERT_EMAIL;
+  const apiKey = CONFIG.RESEND_API_KEY;
+  const toEmail = CONFIG.ALERT_EMAIL;
 
   if (!apiKey || !toEmail) {
     console.warn(
@@ -216,31 +235,153 @@ async function sendEmailAlert(domain) {
 }
 
 // ============================================================================
-// Main Loop
+// Summary Email (Health Report)
 // ============================================================================
 
-async function checkAndUpdate(db) {
-  const now = new Date();
-  console.log(`[${now.toISOString()}] Checking domain: ${CONFIG.DOMAIN}`);
+async function sendSummaryEmail(sqlite) {
+  const apiKey = CONFIG.RESEND_API_KEY;
+  const toEmail = CONFIG.ALERT_EMAIL;
 
-  // Check domain availability via RDAP
-  const result = await checkDomainAvailability();
-
-  if (result.status === "error") {
-    console.log("[Check] Skipping update due to error");
+  if (!apiKey || !toEmail) {
+    console.warn(
+      "[Summary] RESEND_API_KEY or ALERT_EMAIL not configured, skipping"
+    );
     return;
   }
 
-  // Get previous status from database
+  const rows = sqlite
+    .query("SELECT domain, status, last_checked_at FROM domain_status")
+    .all();
+  const now = new Date();
+
+  const domainRows = rows
+    .map((r) => {
+      const statusColor =
+        r.status === "available"
+          ? "#22c55e"
+          : r.status === "registered"
+          ? "#3b82f6"
+          : "#ef4444";
+      const statusEmoji =
+        r.status === "available"
+          ? "✅"
+          : r.status === "registered"
+          ? "🔒"
+          : "⚠️";
+      return `
+      <tr>
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${
+          r.domain
+        }</td>
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: ${statusColor};">
+          ${statusEmoji} ${r.status.toUpperCase()}
+        </td>
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-size: 12px;">
+          ${new Date(r.last_checked_at).toISOString()}
+        </td>
+      </tr>
+    `;
+    })
+    .join("");
+
+  const counts = {
+    total: rows.length,
+    available: rows.filter((r) => r.status === "available").length,
+    registered: rows.filter((r) => r.status === "registered").length,
+    error: rows.filter((r) => r.status === "error").length,
+  };
+
+  const healthStatus = counts.error > 0 ? "⚠️ Com erros" : "✅ Saudável";
+
+  const payload = {
+    from: "Domain Monitor <onboarding@resend.dev>",
+    to: [toEmail],
+    subject: `📊 Domain Monitor - Relatório (${counts.registered} registrados, ${counts.available} disponíveis)`,
+    html: `
+      <div style="font-family: sans-serif; padding: 20px; max-width: 600px;">
+        <h1 style="color: #1f2937; margin-bottom: 8px;">📊 Relatório de Monitoramento</h1>
+        <p style="color: #6b7280; margin-top: 0;">Gerado em: ${now.toISOString()}</p>
+        
+        <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 20px 0;">
+          <h3 style="margin: 0 0 12px 0; color: #374151;">Status Geral: ${healthStatus}</h3>
+          <div style="display: flex; gap: 20px;">
+            <span>📦 <strong>${counts.total}</strong> domínios</span>
+            <span>🔒 <strong>${counts.registered}</strong> registrados</span>
+            <span>✅ <strong>${counts.available}</strong> disponíveis</span>
+            ${
+              counts.error > 0
+                ? `<span>⚠️ <strong>${counts.error}</strong> erros</span>`
+                : ""
+            }
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+          <thead>
+            <tr style="background: #f9fafb;">
+              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Domínio</th>
+              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Status</th>
+              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Última Verificação</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${domainRows}
+          </tbody>
+        </table>
+
+        <p style="color: #9ca3af; font-size: 12px; margin-top: 30px; text-align: center;">
+          Domain Availability Monitor - Relatório automático a cada 2 horas
+        </p>
+      </div>
+    `,
+  };
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.ok) {
+      console.log(`[Summary] Health report sent to ${toEmail}`);
+    } else {
+      const error = await response.text();
+      console.error(`[Summary] Failed: ${error}`);
+    }
+  } catch (error) {
+    console.error(`[Summary] Error: ${error.message}`);
+  }
+}
+
+// ============================================================================
+// Check Single Domain
+// ============================================================================
+
+async function checkAndUpdateDomain(db, domain) {
+  const now = new Date();
+  console.log(`[${now.toISOString()}] Checking: ${domain}`);
+
+  const result = await checkDomainAvailability(domain);
+
+  if (result.status === "error") {
+    console.log(`[Check] ${domain}: Skipping update due to error`);
+    return { domain, status: "error", changed: false };
+  }
+
+  // Get previous status
   const existing = db
     .select()
     .from(domainStatus)
-    .where(eq(domainStatus.domain, CONFIG.DOMAIN))
+    .where(eq(domainStatus.domain, domain))
     .get();
 
   const previousStatus = existing?.status || null;
 
-  // Update or insert status
+  // Update or insert
   if (existing) {
     db.update(domainStatus)
       .set({
@@ -248,12 +389,12 @@ async function checkAndUpdate(db) {
         lastCheckedAt: now,
         updatedAt: previousStatus !== result.status ? now : existing.updatedAt,
       })
-      .where(eq(domainStatus.domain, CONFIG.DOMAIN))
+      .where(eq(domainStatus.domain, domain))
       .run();
   } else {
     db.insert(domainStatus)
       .values({
-        domain: CONFIG.DOMAIN,
+        domain,
         status: result.status,
         lastCheckedAt: now,
         updatedAt: now,
@@ -261,15 +402,77 @@ async function checkAndUpdate(db) {
       .run();
   }
 
-  // Send alert only on status change to "available"
+  // Send alert on status change to "available"
   if (previousStatus !== "available" && result.status === "available") {
-    console.log(`[Alert] Domain ${CONFIG.DOMAIN} is now AVAILABLE!`);
-    await sendWebhookAlert(CONFIG.DOMAIN, result.status);
-    await sendEmailAlert(CONFIG.DOMAIN);
-  } else {
-    console.log(`[Status] ${CONFIG.DOMAIN}: ${result.status} (no change)`);
+    console.log(`[Alert] 🎉 ${domain} is now AVAILABLE!`);
+    await sendWebhookAlert(domain, result.status);
+    await sendEmailAlert(domain);
+    return { domain, status: "available", changed: true };
   }
+
+  console.log(`[Status] ${domain}: ${result.status}`);
+  return { domain, status: result.status, changed: false };
 }
+
+// ============================================================================
+// Check All Domains
+// ============================================================================
+
+async function checkAllDomains(db) {
+  console.log(`\n${"─".repeat(60)}`);
+  console.log(`Checking ${CONFIG.DOMAINS.length} domain(s)...`);
+  console.log(`${"─".repeat(60)}`);
+
+  const results = [];
+  for (const domain of CONFIG.DOMAINS) {
+    const result = await checkAndUpdateDomain(db, domain);
+    results.push(result);
+  }
+
+  return results;
+}
+
+// ============================================================================
+// Generate Health Badge JSON
+// ============================================================================
+
+function generateHealthBadge(sqlite) {
+  const rows = sqlite
+    .query("SELECT domain, status, last_checked_at FROM domain_status")
+    .all();
+
+  const summary = {
+    lastCheck: new Date().toISOString(),
+    domains: rows.map((r) => ({
+      domain: r.domain,
+      status: r.status,
+      lastChecked: new Date(r.last_checked_at).toISOString(),
+    })),
+    counts: {
+      total: rows.length,
+      available: rows.filter((r) => r.status === "available").length,
+      registered: rows.filter((r) => r.status === "registered").length,
+      error: rows.filter((r) => r.status === "error").length,
+    },
+  };
+
+  // Write badge JSON for shields.io endpoint
+  const badgeData = {
+    schemaVersion: 1,
+    label: "domains",
+    message: `${summary.counts.registered} registered | ${summary.counts.available} available`,
+    color: summary.counts.available > 0 ? "brightgreen" : "blue",
+  };
+
+  Bun.write("./data/badge.json", JSON.stringify(badgeData, null, 2));
+  Bun.write("./data/status.json", JSON.stringify(summary, null, 2));
+
+  console.log(`[Badge] Generated ./data/badge.json and ./data/status.json`);
+}
+
+// ============================================================================
+// Main
+// ============================================================================
 
 async function main() {
   const isLoopMode = process.env.LOOP_MODE === "true";
@@ -277,28 +480,40 @@ async function main() {
   console.log("=".repeat(60));
   console.log("Domain Availability Monitor");
   console.log("=".repeat(60));
-  console.log(`Domain: ${CONFIG.DOMAIN}`);
-  console.log(
-    `Mode: ${isLoopMode ? "Continuous (loop)" : "Single run (GitHub Actions)"}`
-  );
+  console.log(`Domains: ${CONFIG.DOMAINS.join(", ")}`);
+  console.log(`Mode: ${isLoopMode ? "Continuous (loop)" : "Single run"}`);
+  console.log(`Retries: ${CONFIG.MAX_RETRIES} with exponential backoff`);
   console.log(`Database: ${CONFIG.DB_PATH}`);
+  console.log(`Email: ${CONFIG.ALERT_EMAIL || "Not configured"}`);
   console.log(
     `Webhook: ${CONFIG.WEBHOOK_URL ? "Configured" : "Not configured"}`
   );
   console.log("=".repeat(60));
 
-  const db = initDatabase();
+  const { db, sqlite } = initDatabase();
+
+  // Summary-only mode (for 2-hour reports)
+  if (process.env.SEND_SUMMARY === "true") {
+    console.log("[Summary] Sending health report...");
+    await sendSummaryEmail(sqlite);
+    console.log("[Monitor] Summary sent. Exiting.");
+    process.exit(0);
+  }
 
   // Run check
-  await checkAndUpdate(db);
+  await checkAllDomains(db);
+
+  // Generate health badge
+  generateHealthBadge(sqlite);
 
   if (isLoopMode) {
-    // Continuous mode for local dev or Fly.io
-    setInterval(() => checkAndUpdate(db), CONFIG.CHECK_INTERVAL_MS);
-    console.log("[Monitor] Running... Press Ctrl+C to stop");
+    setInterval(async () => {
+      await checkAllDomains(db);
+      generateHealthBadge(sqlite);
+    }, CONFIG.CHECK_INTERVAL_MS);
+    console.log("\n[Monitor] Running... Press Ctrl+C to stop");
   } else {
-    // Single run mode for GitHub Actions
-    console.log("[Monitor] Check complete. Exiting.");
+    console.log("\n[Monitor] Check complete. Exiting.");
     process.exit(0);
   }
 }
