@@ -4,3 +4,5 @@ node_modules/
 .fly/
 status.json
 badge.json
+data/status.json
+data/badge.json
