@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { eq } from "drizzle-orm";
+import { domainAvailable, summaryReport } from "./email-templates.js";
 
 // ============================================================================
 // Configuration
@@ -197,20 +198,16 @@ async function sendEmailAlert(domain) {
     return;
   }
 
+  const template = domainAvailable({
+    domain,
+    checkedAt: new Date().toISOString(),
+  });
+
   const payload = {
     from: "Domain Monitor <onboarding@resend.dev>",
     to: [toEmail],
-    subject: `🚨 DOMÍNIO DISPONÍVEL: ${domain}`,
-    html: `
-      <div style="font-family: sans-serif; padding: 20px;">
-        <h1 style="color: #22c55e;">🎉 Domínio Disponível!</h1>
-        <p style="font-size: 18px;">O domínio <strong>${domain}</strong> está <span style="color: #22c55e; font-weight: bold;">DISPONÍVEL</span> para registro!</p>
-        <p style="background: #f3f4f6; padding: 15px; border-radius: 8px;">
-          <strong>Ação:</strong> Registre imediatamente antes que alguém pegue!
-        </p>
-        <p style="color: #6b7280; font-size: 14px;">Verificado em: ${new Date().toISOString()}</p>
-      </div>
-    `,
+    subject: template.subject,
+    html: template.html,
   };
 
   try {
@@ -252,37 +249,12 @@ async function sendSummaryEmail(sqlite) {
   const rows = sqlite
     .query("SELECT domain, status, last_checked_at FROM domain_status")
     .all();
-  const now = new Date();
 
-  const domainRows = rows
-    .map((r) => {
-      const statusColor =
-        r.status === "available"
-          ? "#22c55e"
-          : r.status === "registered"
-          ? "#3b82f6"
-          : "#ef4444";
-      const statusEmoji =
-        r.status === "available"
-          ? "✅"
-          : r.status === "registered"
-          ? "🔒"
-          : "⚠️";
-      return `
-      <tr>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${
-          r.domain
-        }</td>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: ${statusColor};">
-          ${statusEmoji} ${r.status.toUpperCase()}
-        </td>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-size: 12px;">
-          ${new Date(r.last_checked_at).toISOString()}
-        </td>
-      </tr>
-    `;
-    })
-    .join("");
+  const domains = rows.map((r) => ({
+    domain: r.domain,
+    status: r.status,
+    lastChecked: new Date(r.last_checked_at).toISOString(),
+  }));
 
   const counts = {
     total: rows.length,
@@ -291,49 +263,17 @@ async function sendSummaryEmail(sqlite) {
     error: rows.filter((r) => r.status === "error").length,
   };
 
-  const healthStatus = counts.error > 0 ? "⚠️ Com erros" : "✅ Saudável";
+  const template = summaryReport({
+    domains,
+    counts,
+    generatedAt: new Date().toISOString(),
+  });
 
   const payload = {
     from: "Domain Monitor <onboarding@resend.dev>",
     to: [toEmail],
-    subject: `📊 Domain Monitor - Relatório (${counts.registered} registrados, ${counts.available} disponíveis)`,
-    html: `
-      <div style="font-family: sans-serif; padding: 20px; max-width: 600px;">
-        <h1 style="color: #1f2937; margin-bottom: 8px;">📊 Relatório de Monitoramento</h1>
-        <p style="color: #6b7280; margin-top: 0;">Gerado em: ${now.toISOString()}</p>
-        
-        <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 20px 0;">
-          <h3 style="margin: 0 0 12px 0; color: #374151;">Status Geral: ${healthStatus}</h3>
-          <div style="display: flex; gap: 20px;">
-            <span>📦 <strong>${counts.total}</strong> domínios</span>
-            <span>🔒 <strong>${counts.registered}</strong> registrados</span>
-            <span>✅ <strong>${counts.available}</strong> disponíveis</span>
-            ${
-              counts.error > 0
-                ? `<span>⚠️ <strong>${counts.error}</strong> erros</span>`
-                : ""
-            }
-          </div>
-        </div>
-
-        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-          <thead>
-            <tr style="background: #f9fafb;">
-              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Domínio</th>
-              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Status</th>
-              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Última Verificação</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${domainRows}
-          </tbody>
-        </table>
-
-        <p style="color: #9ca3af; font-size: 12px; margin-top: 30px; text-align: center;">
-          Domain Availability Monitor - Relatório automático a cada 2 horas
-        </p>
-      </div>
-    `,
+    subject: template.subject,
+    html: template.html,
   };
 
   try {

@@ -1,6 +1,10 @@
 {
   "schemaVersion": 1,
   "label": "domains",
+<<<<<<< HEAD
   "message": "1 registered | 0 available",
+=======
+  "message": "3 registered | 0 available",
+>>>>>>> 437109a (feat: introduce dedicated email templates for notifications and reports, and update domain status data.)
   "color": "blue"
 }
