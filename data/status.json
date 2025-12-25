@@ -1,16 +1,16 @@
 {
-  "lastCheck": "2025-12-25T08:50:20.378Z",
+  "lastCheck": "2025-12-25T08:55:14.639Z",
   "domains": [
     {
       "domain": "myleads.click",
-      "status": "available",
-      "lastChecked": "2025-12-25T08:50:19.000Z"
+      "status": "registered",
+      "lastChecked": "2025-12-25T08:55:13.000Z"
     }
   ],
   "counts": {
     "total": 1,
-    "available": 1,
-    "registered": 0,
+    "available": 0,
+    "registered": 1,
     "error": 0
   }
 }
