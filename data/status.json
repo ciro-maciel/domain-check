@@ -1,10 +1,18 @@
 {
+<<<<<<< HEAD
   "lastCheck": "2025-12-25T08:55:14.639Z",
+=======
+  "lastCheck": "2025-12-25T08:56:31.007Z",
+>>>>>>> 7678926 (feat: Enhance RDAP domain check by explicitly following redirects, adding detailed logging, and improving 200 OK response parsing for registration confirmation, alongside minor email template styling adjustments.)
   "domains": [
     {
       "domain": "myleads.click",
       "status": "registered",
+<<<<<<< HEAD
       "lastChecked": "2025-12-25T08:55:13.000Z"
+=======
+      "lastChecked": "2025-12-25T08:56:30.000Z"
+>>>>>>> 7678926 (feat: Enhance RDAP domain check by explicitly following redirects, adding detailed logging, and improving 200 OK response parsing for registration confirmation, alongside minor email template styling adjustments.)
     }
   ],
   "counts": {

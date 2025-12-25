@@ -103,6 +103,7 @@ const baseStyles = `
     .stat-value {
         font-size: 28px;
         font-weight: 600;
+        font-style: normal;
         color: #111827;
         margin: 0;
         line-height: 1.2;
@@ -330,19 +331,19 @@ Domain Monitor
             <![endif]-->
             <div style="display: flex; gap: 16px; margin: 24px 0;">
                 <div style="flex: 1; padding: 20px; text-align: center; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff;">
-                    <p style="font-size: 28px; font-weight: 600; color: #111827; margin: 0; line-height: 1.2;">${
+                    <p style="font-size: 28px; font-weight: 600; font-style: normal; color: #111827; margin: 0; line-height: 1.2;">${
                       counts.total
                     }</p>
                     <p style="font-size: 11px; font-weight: 500; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; margin: 8px 0 0 0;">Total</p>
                 </div>
                 <div style="flex: 1; padding: 20px; text-align: center; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff;">
-                    <p style="font-size: 28px; font-weight: 600; color: #6b7280; margin: 0; line-height: 1.2;">${
+                    <p style="font-size: 28px; font-weight: 600; font-style: normal; color: #6b7280; margin: 0; line-height: 1.2;">${
                       counts.registered
                     }</p>
                     <p style="font-size: 11px; font-weight: 500; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; margin: 8px 0 0 0;">Registrados</p>
                 </div>
                 <div style="flex: 1; padding: 20px; text-align: center; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff;">
-                    <p style="font-size: 28px; font-weight: 600; color: ${
+                    <p style="font-size: 28px; font-weight: 600; font-style: normal; color: ${
                       counts.available > 0 ? "#059669" : "#111827"
                     }; margin: 0; line-height: 1.2;">${counts.available}</p>
                     <p style="font-size: 11px; font-weight: 500; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; margin: 8px 0 0 0;">Disponíveis</p>
@@ -369,9 +370,7 @@ Domain Monitor
                 </tbody>
             </table>
             
-            <div class="divider"></div>
-            
-            <p class="timestamp" style="text-align: center;">Relatório gerado em ${formattedDate}</p>
+            <p class="timestamp" style="text-align: center; margin-top: 24px;">Relatório gerado em ${formattedDate}</p>
             `,
       ""
     ),

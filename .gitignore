@@ -2,3 +2,5 @@ node_modules/
 *.db
 .env
 .fly/
+status.json
+badge.json

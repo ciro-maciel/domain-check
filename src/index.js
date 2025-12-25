@@ -95,15 +95,35 @@ async function checkDomainAvailability(domain, retries = CONFIG.MAX_RETRIES) {
       const response = await fetch(rdapUrl, {
         method: "GET",
         headers: { Accept: "application/rdap+json" },
+        redirect: "follow", // Explicitly follow redirects
       });
+
+      console.log(
+        `[RDAP] ${domain}: HTTP ${response.status} (URL: ${response.url})`
+      );
 
       // 404 = domain not found = available
       if (response.status === 404) {
+        console.log(`[RDAP] ${domain}: Not found (404) - Domain is AVAILABLE`);
         return { available: true, status: "available" };
       }
 
       // 200 = domain exists = registered
       if (response.ok) {
+        // Double-check by parsing the response to confirm it's a valid RDAP response
+        try {
+          const data = await response.json();
+          // If we have an ldhName or handle, the domain is definitely registered
+          if (data.ldhName || data.handle) {
+            console.log(
+              `[RDAP] ${domain}: Found registration data - Domain is REGISTERED`
+            );
+            return { available: false, status: "registered" };
+          }
+        } catch (parseError) {
+          // If we can't parse but got 200, still consider it registered
+          console.log(`[RDAP] ${domain}: Got 200 OK - Domain is REGISTERED`);
+        }
         return { available: false, status: "registered" };
       }
 
