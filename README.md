@@ -176,4 +176,4 @@ domain-check/
 
 ## 📜 Licença
 
-MIT © [Ciro Maciel](https://github.com/ciro-maciel)
+Apache-2.0 © [Ciro Maciel](https://github.com/ciro-maciel)
