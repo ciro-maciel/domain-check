@@ -253,7 +253,7 @@ async function sendSummaryEmail(sqlite) {
   const domains = rows.map((r) => ({
     domain: r.domain,
     status: r.status,
-    lastChecked: new Date(r.last_checked_at).toISOString(),
+    lastChecked: new Date(r.last_checked_at * 1000).toISOString(),
   }));
 
   const counts = {
@@ -386,7 +386,7 @@ function generateHealthBadge(sqlite) {
     domains: rows.map((r) => ({
       domain: r.domain,
       status: r.status,
-      lastChecked: new Date(r.last_checked_at).toISOString(),
+      lastChecked: new Date(r.last_checked_at * 1000).toISOString(),
     })),
     counts: {
       total: rows.length,

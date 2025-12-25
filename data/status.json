@@ -1,40 +1,16 @@
 {
-<<<<<<< HEAD
-  "lastCheck": "2025-12-25T08:43:34.361Z",
-=======
-  "lastCheck": "2025-12-25T08:40:50.278Z",
->>>>>>> 437109a (feat: introduce dedicated email templates for notifications and reports, and update domain status data.)
+  "lastCheck": "2025-12-25T08:50:20.378Z",
   "domains": [
     {
       "domain": "myleads.click",
-      "status": "registered",
-<<<<<<< HEAD
-      "lastChecked": "1970-01-21T10:44:12.213Z"
+      "status": "available",
+      "lastChecked": "2025-12-25T08:50:19.000Z"
     }
   ],
   "counts": {
     "total": 1,
-    "available": 0,
-    "registered": 1,
-=======
-      "lastChecked": "1970-01-21T10:44:12.049Z"
-    },
-    {
-      "domain": "google.com",
-      "status": "registered",
-      "lastChecked": "1970-01-21T10:44:11.833Z"
-    },
-    {
-      "domain": "github.com",
-      "status": "registered",
-      "lastChecked": "1970-01-21T10:44:11.834Z"
-    }
-  ],
-  "counts": {
-    "total": 3,
-    "available": 0,
-    "registered": 3,
->>>>>>> 437109a (feat: introduce dedicated email templates for notifications and reports, and update domain status data.)
+    "available": 1,
+    "registered": 0,
     "error": 0
   }
 }
