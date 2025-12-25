@@ -1,0 +1,16 @@
+{
+  "name": "domain-check",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.js",
+    "dev": "bun run --watch src/index.js",
+    "test": "rm -f ./data/domain-check.db && TEST_MODE=true bun run src/index.js"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.38.3"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.1"
+  }
+}
