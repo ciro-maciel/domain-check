@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
   "label": "domains",
-  "message": "1 registered | 0 available",
-  "color": "blue"
+  "message": "0 registered | 1 available",
+  "color": "brightgreen"
 }
